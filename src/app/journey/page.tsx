@@ -21,13 +21,16 @@ export default function JourneyPage() {
 
   useEffect(() => {
     if (system?.prompt) {
-      setMessages([{ role: "system", content: system.prompt }]);
+      setMessages([{ role: "system" as const, content: system.prompt }]);
     }
   }, [system?.prompt]);
 
   const send = async () => {
     if (!input.trim() || streaming) return;
-    const nextMsgs = [...messages, { role: "user", content: input.trim() }];
+    const nextMsgs: ChatMsg[] = [
+      ...messages,
+      { role: "user" as const, content: input.trim() },
+    ];
     setMessages(nextMsgs);
     setInput("");
     setStreaming(true);
@@ -47,13 +50,18 @@ export default function JourneyPage() {
       if (done) break;
       assistant += decoder.decode(value, { stream: true });
       setMessages((m) => {
-        const base = m.filter((x) => x.role !== "assistant" || x !== m[m.length - 1]);
-        return [...base, { role: "assistant", content: assistant }];
+        const base = m.filter(
+          (x) => x.role !== "assistant" || x !== m[m.length - 1],
+        ) as ChatMsg[];
+        return [...base, { role: "assistant" as const, content: assistant }];
       });
     }
     setStreaming(false);
 
-    const persisted = [...nextMsgs, { role: "assistant", content: assistant }];
+    const persisted: ChatMsg[] = [
+      ...nextMsgs,
+      { role: "assistant" as const, content: assistant },
+    ];
     void saveBatch.mutate({ day, messages: persisted });
   };
 
