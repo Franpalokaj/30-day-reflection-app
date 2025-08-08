@@ -26,6 +26,47 @@ model Post {
     @@index([name])
 }
 
+/// 30-Day Reflection App Models
+model Journey {
+  id          String        @id @default(cuid())
+  user        User          @relation(fields: [userId], references: [id])
+  userId      String
+  isActive    Boolean       @default(true)
+  currentDay  Int           @default(1)
+  startedAt   DateTime      @default(now())
+  lastActive  DateTime      @updatedAt
+  archivedAt  DateTime?
+  reflections Reflection[]
+  rapport     Rapport?
+
+  @@index([userId, isActive])
+}
+
+model Reflection {
+  id             String   @id @default(cuid())
+  journey        Journey  @relation(fields: [journeyId], references: [id])
+  journeyId      String
+  dayNumber      Int
+  messages       Json
+  aiSummary      String?
+  structuredData Json?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([journeyId, dayNumber])
+  @@index([journeyId])
+}
+
+model Rapport {
+  id         String   @id @default(cuid())
+  journey    Journey  @relation(fields: [journeyId], references: [id])
+  journeyId  String   @unique
+  content    String   @default("")
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+}
+
 // Necessary for Next auth
 model Account {
     id                       String  @id @default(cuid())
@@ -63,6 +104,7 @@ model User {
     accounts      Account[]
     sessions      Session[]
     posts         Post[]
+    journeys      Journey[]
 }
 
 model VerificationToken {

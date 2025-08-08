@@ -1,14 +1,14 @@
 import Link from "next/link";
 
 import { LatestPost } from "~/app/_components/post";
-import { auth } from "~/server/auth";
+import { auth, currentUser } from "@clerk/nextjs";
 import { api, HydrateClient } from "~/trpc/server";
 
 export default async function Home() {
   const hello = await api.post.hello({ text: "from tRPC" });
-  const session = await auth();
+  const user = await currentUser();
 
-  if (session?.user) {
+  if (user?.id) {
     void api.post.getLatest.prefetch();
   }
 
@@ -50,18 +50,28 @@ export default async function Home() {
 
             <div className="flex flex-col items-center justify-center gap-4">
               <p className="text-center text-2xl text-white">
-                {session && <span>Logged in as {session.user?.name}</span>}
+                {user && <span>Logged in as {user.fullName ?? user.emailAddresses[0]?.emailAddress}</span>}
               </p>
               <Link
-                href={session ? "/api/auth/signout" : "/api/auth/signin"}
+                href={user ? "/journey" : "/sign-in"}
                 className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
               >
-                {session ? "Sign out" : "Sign in"}
+                {user ? "Open Journey" : "Sign in"}
               </Link>
             </div>
           </div>
 
-          {session?.user && <LatestPost />}
+          {user ? (
+            <div className="flex flex-col items-center gap-4">
+              <LatestPost />
+              <Link
+                href="/journey"
+                className="rounded-full bg-[#6C63FF] px-6 py-3 font-semibold text-white hover:opacity-90"
+              >
+                Go to Your 30-Day Journey
+              </Link>
+            </div>
+          ) : null}
         </div>
       </main>
     </HydrateClient>
