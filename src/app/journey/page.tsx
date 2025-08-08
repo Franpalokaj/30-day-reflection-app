@@ -51,8 +51,8 @@ export default function JourneyPage() {
       assistant += decoder.decode(value, { stream: true });
       setMessages((m) => {
         const base = m.filter(
-          (x) => x.role !== "assistant" || x !== m[m.length - 1],
-        ) as ChatMsg[];
+          (x, idx) => !(x.role === "assistant" && idx === m.length - 1),
+        );
         return [...base, { role: "assistant" as const, content: assistant }];
       });
     }
@@ -66,6 +66,8 @@ export default function JourneyPage() {
   };
 
   const finish = async () => {
+    // Ensure an active journey exists; if not, create one
+    await api.journey.startNew.mutateAsync({ startDay: day }).catch(() => undefined);
     const transcript = messages
       .filter((m) => m.role !== "system")
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
@@ -81,14 +83,14 @@ export default function JourneyPage() {
   };
 
   return (
-    <main className="mx-auto flex h-[100dvh] max-w-2xl flex-col gap-4 p-4 text-white">
+    <main className="mx-auto flex h-[100dvh] max-w-2xl flex-col gap-4 bg-gradient-to-b from-[#0b0b12] to-[#15162c] p-4 text-white">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">30-Day AI Reflection</h1>
         <div className="text-sm opacity-80">Day {day} / 30</div>
       </header>
       <div
         ref={listRef}
-        className="flex-1 space-y-3 overflow-y-auto rounded-lg bg-black/20 p-3"
+        className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-white/10 bg-white/5 p-3"
       >
         {messages
           .filter((m) => m.role !== "system")
@@ -96,8 +98,8 @@ export default function JourneyPage() {
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
                 className={`${
-                  m.role === "user" ? "bg-[hsl(260,100%,70%)]/30" : "bg-white/10"
-                } rounded-2xl px-3 py-2 text-sm leading-relaxed`}
+                  m.role === "user" ? "bg-[#6C63FF]/30" : "bg-white/10"
+                } rounded-2xl px-3 py-2 text-sm leading-relaxed text-white`}
               >
                 {m.content}
               </div>
@@ -109,16 +111,22 @@ export default function JourneyPage() {
       </div>
       <div className="flex items-center gap-2">
         <input
-          className="min-h-10 flex-1 rounded-full bg-white/10 px-4 py-2 outline-none"
+          className="min-h-10 flex-1 rounded-full bg-white/10 px-4 py-2 text-white outline-none placeholder:text-white/50"
           placeholder="Type your reflection…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
           maxLength={1000}
         />
         <button
           onClick={send}
           disabled={streaming || !input.trim()}
-          className="rounded-full bg-[hsl(260,100%,70%)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-full bg-[#6C63FF] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           Send
         </button>

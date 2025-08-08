@@ -1,12 +1,12 @@
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { COACH_SYSTEM_PROMPT } from "~/server/ai/openai";
 
 export const journeyRouter = createTRPCRouter({
   getActive: protectedProcedure.query(async ({ ctx }) => {
-    const pdb = ctx.db as any;
-    const journey = await pdb.journey.findFirst({
+    const journey = await ctx.db.journey.findFirst({
       where: { userId: ctx.session.user.id, isActive: true },
       include: { rapport: true },
     });
@@ -16,14 +16,13 @@ export const journeyRouter = createTRPCRouter({
   startNew: protectedProcedure
     .input(z.object({ startDay: z.number().min(1).max(30).default(1) }).optional())
     .mutation(async ({ ctx, input }) => {
-      const pdb = ctx.db as any;
       // Archive existing active journey if any
-      await pdb.journey.updateMany({
+      await ctx.db.journey.updateMany({
         where: { userId: ctx.session.user.id, isActive: true },
         data: { isActive: false, archivedAt: new Date() },
       });
 
-      const journey = await pdb.journey.create({
+      const journey = await ctx.db.journey.create({
         data: {
           userId: ctx.session.user.id,
           currentDay: input?.startDay ?? 1,
@@ -36,12 +35,11 @@ export const journeyRouter = createTRPCRouter({
   getDay: protectedProcedure
     .input(z.object({ day: z.number().min(1).max(30) }))
     .query(async ({ ctx, input }) => {
-      const pdb = ctx.db as any;
-      const journey = await pdb.journey.findFirstOrThrow({
+      const journey = await ctx.db.journey.findFirstOrThrow({
         where: { userId: ctx.session.user.id, isActive: true },
         select: { id: true },
       });
-      const reflection = await pdb.reflection.findUnique({
+      const reflection = await ctx.db.reflection.findUnique({
         where: { journeyId_dayNumber: { journeyId: journey.id, dayNumber: input.day } },
       });
       return reflection ?? null;
@@ -55,20 +53,19 @@ export const journeyRouter = createTRPCRouter({
       ),
     }))
     .mutation(async ({ ctx, input }) => {
-      const pdb = ctx.db as any;
-      const journey = await pdb.journey.findFirstOrThrow({
+      const journey = await ctx.db.journey.findFirstOrThrow({
         where: { userId: ctx.session.user.id, isActive: true },
         select: { id: true },
       });
-      const reflection = await pdb.reflection.upsert({
+      const reflection = await ctx.db.reflection.upsert({
         where: { journeyId_dayNumber: { journeyId: journey.id, dayNumber: input.day } },
         create: {
           journeyId: journey.id,
           dayNumber: input.day,
-          messages: input.messages as unknown as Record<string, unknown>,
+          messages: input.messages as unknown as Prisma.InputJsonValue,
         },
         update: {
-          messages: input.messages as unknown as Record<string, unknown>,
+          messages: input.messages as unknown as Prisma.InputJsonValue,
         },
       });
       return reflection;
@@ -84,12 +81,11 @@ export const journeyRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const pdb = ctx.db as any;
-      const activeJourney = await pdb.journey.findFirstOrThrow({
+      const activeJourney = await ctx.db.journey.findFirstOrThrow({
         where: { userId: ctx.session.user.id, isActive: true },
       });
 
-      const reflection = await pdb.reflection.upsert({
+      const reflection = await ctx.db.reflection.upsert({
         where: {
           journeyId_dayNumber: {
             journeyId: activeJourney.id,
@@ -99,33 +95,33 @@ export const journeyRouter = createTRPCRouter({
         create: {
           journeyId: activeJourney.id,
           dayNumber: input.day,
-          messages: [],
+          messages: [] as unknown as Prisma.InputJsonValue,
           aiSummary: input.aiSummary,
-          structuredData: input.structuredData as unknown as Record<string, unknown> | null,
+          structuredData: (input.structuredData ?? null) as unknown as Prisma.InputJsonValue,
           completedAt: new Date(),
         },
         update: {
           aiSummary: input.aiSummary,
-          structuredData: input.structuredData as unknown as Record<string, unknown> | null,
+          structuredData: (input.structuredData ?? null) as unknown as Prisma.InputJsonValue,
           completedAt: new Date(),
         },
       });
 
-      const existingRapport = await pdb.rapport.findUnique({
+      const existingRapport = await ctx.db.rapport.findUnique({
         where: { journeyId: activeJourney.id },
         select: { content: true },
       });
       const newContent = [existingRapport?.content ?? "", "\n\n", input.rapportAppend]
         .join("")
         .trim();
-      await pdb.rapport.upsert({
+      await ctx.db.rapport.upsert({
         where: { journeyId: activeJourney.id },
         create: { journeyId: activeJourney.id, content: newContent },
         update: { content: newContent },
       });
 
       const nextDay = Math.min(30, Math.max(activeJourney.currentDay, input.day) + 1);
-      await pdb.journey.update({
+      await ctx.db.journey.update({
         where: { id: activeJourney.id },
         data: { currentDay: nextDay },
       });
@@ -136,8 +132,7 @@ export const journeyRouter = createTRPCRouter({
   buildSystemPrompt: protectedProcedure
     .input(z.object({ day: z.number().min(1).max(30) }))
     .query(async ({ ctx, input }) => {
-      const pdb = ctx.db as any;
-      const journey = await pdb.journey.findFirst({
+      const journey = await ctx.db.journey.findFirst({
         where: { userId: ctx.session.user.id, isActive: true },
         include: { rapport: true, reflections: true },
       });

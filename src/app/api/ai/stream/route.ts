@@ -1,18 +1,26 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { openai } from "~/server/ai/openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => null);
-  if (!body || !Array.isArray(body.messages)) {
+  const body: unknown = await req.json().catch(() => null);
+  if (!body || !Array.isArray((body as { messages?: unknown }).messages)) {
     return new Response("Invalid payload", { status: 400 });
   }
+
+  const raw = (body as { messages: Array<{ role: "system" | "user" | "assistant"; content: string }> })
+    .messages;
+  const messages: ChatCompletionMessageParam[] = raw.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
 
   const stream = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     stream: true,
-    messages: body.messages,
+    messages,
     temperature: 0.7,
   });
 
