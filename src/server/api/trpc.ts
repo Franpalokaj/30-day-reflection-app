@@ -11,7 +11,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { db } from "~/server/db";
 
 /**
@@ -28,10 +28,17 @@ import { db } from "~/server/db";
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   const { userId } = await auth();
+  const user = await currentUser();
 
   return {
     db,
-    session: userId ? { user: { id: userId } } : null,
+    session: userId ? { 
+      user: { 
+        id: userId,
+        email: user?.emailAddresses[0]?.emailAddress || null,
+        name: user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : null,
+      } 
+    } : null,
     ...opts,
   };
 };

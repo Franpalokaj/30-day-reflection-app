@@ -13,9 +13,66 @@ export const journeyRouter = createTRPCRouter({
     return journey;
   }),
 
+  getCompletedDays: protectedProcedure.query(async ({ ctx }) => {
+    const journey = await ctx.db.journey.findFirst({
+      where: { userId: ctx.session.user.id, isActive: true },
+      select: { id: true },
+    });
+    
+    if (!journey) return [];
+    
+    const completedReflections = await ctx.db.reflection.findMany({
+      where: { 
+        journeyId: journey.id,
+        completedAt: { not: null }
+      },
+      select: { dayNumber: true }
+    });
+    
+    return completedReflections.map((r: { dayNumber: number }) => r.dayNumber);
+  }),
+
+  getRapport: protectedProcedure.query(async ({ ctx }) => {
+    const journey = await ctx.db.journey.findFirst({
+      where: { userId: ctx.session.user.id, isActive: true },
+      select: { id: true },
+    });
+    
+    if (!journey) return { content: "" };
+    
+    const rapport = await ctx.db.rapport.findUnique({
+      where: { journeyId: journey.id },
+      select: { content: true },
+    });
+    
+    // If no rapport exists, create one
+    if (!rapport) {
+      await ctx.db.rapport.create({
+        data: {
+          journeyId: journey.id,
+          content: "",
+        },
+      });
+      return { content: "" };
+    }
+    
+    return rapport;
+  }),
+
   startNew: protectedProcedure
     .input(z.object({ startDay: z.number().min(1).max(30).default(1) }).optional())
     .mutation(async ({ ctx, input }) => {
+      // Ensure user exists in database
+      const user = await ctx.db.user.upsert({
+        where: { id: ctx.session.user.id },
+        update: {},
+        create: {
+          id: ctx.session.user.id,
+          email: ctx.session.user.email || null,
+          name: ctx.session.user.name || null,
+        },
+      });
+
       // Archive existing active journey if any
       await ctx.db.journey.updateMany({
         where: { userId: ctx.session.user.id, isActive: true },
@@ -35,10 +92,15 @@ export const journeyRouter = createTRPCRouter({
   getDay: protectedProcedure
     .input(z.object({ day: z.number().min(1).max(30) }))
     .query(async ({ ctx, input }) => {
-      const journey = await ctx.db.journey.findFirstOrThrow({
+      const journey = await ctx.db.journey.findFirst({
         where: { userId: ctx.session.user.id, isActive: true },
         select: { id: true },
       });
+      
+      if (!journey) {
+        return null;
+      }
+      
       const reflection = await ctx.db.reflection.findUnique({
         where: { journeyId_dayNumber: { journeyId: journey.id, dayNumber: input.day } },
       });
@@ -75,58 +137,44 @@ export const journeyRouter = createTRPCRouter({
     .input(
       z.object({
         day: z.number().min(1).max(30),
-        aiSummary: z.string().min(1),
-        rapportAppend: z.string().min(1),
-        structuredData: z.record(z.any()).optional(),
+        aiSummary: z.string(),
+        rapportAppend: z.string(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const activeJourney = await ctx.db.journey.findFirstOrThrow({
+      const journey = await ctx.db.journey.findFirstOrThrow({
         where: { userId: ctx.session.user.id, isActive: true },
+        select: { id: true },
       });
 
-      const reflection = await ctx.db.reflection.upsert({
-        where: {
-          journeyId_dayNumber: {
-            journeyId: activeJourney.id,
-            dayNumber: input.day,
-          },
-        },
-        create: {
-          journeyId: activeJourney.id,
-          dayNumber: input.day,
-          messages: [] as unknown as Prisma.InputJsonValue,
-          aiSummary: input.aiSummary,
-          structuredData: (input.structuredData ?? null) as unknown as Prisma.InputJsonValue,
-          completedAt: new Date(),
-        },
-        update: {
-          aiSummary: input.aiSummary,
-          structuredData: (input.structuredData ?? null) as unknown as Prisma.InputJsonValue,
-          completedAt: new Date(),
-        },
+      // Update reflection as completed
+      await ctx.db.reflection.updateMany({
+        where: { journeyId: journey.id, dayNumber: input.day },
+        data: { completedAt: new Date(), aiSummary: input.aiSummary },
       });
 
+      // Update rapport by appending content
       const existingRapport = await ctx.db.rapport.findUnique({
-        where: { journeyId: activeJourney.id },
+        where: { journeyId: journey.id },
         select: { content: true },
       });
-      const newContent = [existingRapport?.content ?? "", "\n\n", input.rapportAppend]
-        .join("")
-        .trim();
+
+      const newContent = existingRapport?.content 
+        ? existingRapport.content + input.rapportAppend
+        : input.rapportAppend;
+
       await ctx.db.rapport.upsert({
-        where: { journeyId: activeJourney.id },
-        create: { journeyId: activeJourney.id, content: newContent },
-        update: { content: newContent },
+        where: { journeyId: journey.id },
+        create: { 
+          journeyId: journey.id, 
+          content: newContent 
+        },
+        update: { 
+          content: newContent 
+        },
       });
 
-      const nextDay = Math.min(30, Math.max(activeJourney.currentDay, input.day) + 1);
-      await ctx.db.journey.update({
-        where: { id: activeJourney.id },
-        data: { currentDay: nextDay },
-      });
-
-      return reflection;
+      return { success: true };
     }),
 
   buildSystemPrompt: protectedProcedure
@@ -134,11 +182,42 @@ export const journeyRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const journey = await ctx.db.journey.findFirst({
         where: { userId: ctx.session.user.id, isActive: true },
-        include: { rapport: true, reflections: true },
+        include: { rapport: true },
       });
-      const priorInsights = journey?.rapport?.content ?? "";
-      const prompt = `${COACH_SYSTEM_PROMPT}\n\nToday is Day ${input.day}. Relevant prior insights (use selectively):\n${priorInsights}`;
-      return { prompt };
+
+      if (!journey) {
+        return "You are an AI coach helping with personal development. Start a new conversation.";
+      }
+
+      const rapportContext = journey.rapport?.content ? `\n\nPrevious Reflection Context:\n${journey.rapport.content}` : "";
+
+      return `You are a compassionate but direct AI coach guiding someone through a 30-day personal development journey. You remember past conversations and build on previous insights.
+
+Your role is to:
+- Ask probing questions that encourage deep reflection
+- Help identify patterns and insights
+- Avoid toxic positivity - be real and honest
+- Remember context from previous days
+- Guide the user toward meaningful self-discovery
+
+When the day is completed, you will be asked to create a structured reflection summary in this format:
+
+Day X:
+Key points we talked about:
+• [Main topics discussed]
+• [Important questions raised]
+
+Core insights:
+• [Key realizations or discoveries]
+• [Important patterns identified]
+
+Recurring patterns:
+• [Any themes that emerged]
+• [Connections to previous days]
+
+${rapportContext}
+
+Today is Day ${input.day} of the journey.`;
     }),
 });
 
